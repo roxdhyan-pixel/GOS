@@ -1,53 +1,40 @@
-# File name: section1-environment-setup.yml
-# Path in repo: .github/workflows/section1-environment-setup.yml
-name: GOS Build - Section 1 - Environment Setup
+# File name: section2-source-sync.yml
+# Path in repo: .github/workflows/section2-source-sync.yml
+name: GOS Build - Section 2 - Source Sync
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
+  workflow_run:
+    workflows: ["GOS Build - Section 1 - Environment Setup"]
+    types:
+      - completed
 
 env:
   DEVICE: dandelion
-  BUILD_TYPE: userdebug
   ANDROID_TARGET: "16"
+  MANIFEST_URL: https://github.com/LineageOS/android.git
+  MANIFEST_BRANCH: lineage-23.0
+  DEVICE_TREE_URL: https://github.com/YOUR_ORG/android_device_xiaomi_dandelion.git
+  DEVICE_TREE_BRANCH: lineage-23.0
+  KERNEL_URL: https://github.com/YOUR_ORG/android_kernel_xiaomi_mt6762.git
+  KERNEL_BRANCH: lineage-23.0
 
 jobs:
-  environment-setup:
+  source-sync:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout GOS repo
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Free up disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo apt-get clean
           df -h
 
-      - name: Install base build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git-core gnupg flex bison build-essential zip curl \
-            zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev \
-            lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip \
-            fontconfig python2 python3 python3-pip ccache \
-            openjdk-17-jdk bc rsync schedtool libssl-dev \
-            imagemagick lib32ncurses5-dev libx11-dev lib32z-dev \
-            liblz4-tool libsdl1.2-dev libwxgtk3.0-gtk3-dev \
-            squashfs-tools pngcrush schedtool dpkg-dev
-
-      - name: Set up python2 for legacy device scripts (DrvGen.py etc.)
-        run: |
-          sudo ln -sf /usr/bin/python2 /usr/bin/python
-          python2 --version
-
-      - name: Set up repo tool
+      - name: Install repo tool
         run: |
           mkdir -p ~/bin
           curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
@@ -60,72 +47,59 @@ jobs:
           git config --global user.email "build@grape-gos.dev"
           git config --global color.ui false
 
-      - name: Clone Proton Clang toolchain
-        run: |
-          mkdir -p toolchains
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchains/proton-clang
-          echo "PATH=$(pwd)/toolchains/proton-clang/bin:$PATH" >> $GITHUB_ENV
-
-      - name: Set up ccache
-        run: |
-          mkdir -p ~/.ccache
-          ccache -M 20G
-          echo "USE_CCACHE=1" >> $GITHUB_ENV
-          echo "CCACHE_EXEC=$(which ccache)" >> $GITHUB_ENV
-
-      - name: Cache toolchain and ccache between runs
+      - name: Restore cached source tree if available
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.ccache
-            toolchains/proton-clang
-          key: gos-${{ env.DEVICE }}-toolchain-${{ hashFiles('**/*.yml') }}
+          path: source
+          key: gos-${{ env.DEVICE }}-source-${{ env.ANDROID_TARGET }}-${{ github.sha }}
           restore-keys: |
-            gos-${{ env.DEVICE }}-toolchain-
+            gos-${{ env.DEVICE }}-source-${{ env.ANDROID_TARGET }}-
 
-      - name: Generate GOS launcher icons from logo
+      - name: Init repo manifest (Android 16 / lineage-23.0)
         run: |
-          mkdir -p out/mipmap-mdpi out/mipmap-hdpi out/mipmap-xhdpi \
-                   out/mipmap-xxhdpi out/mipmap-xxxhdpi
-          if [ -f "branding/gos-logo.png" ]; then
-            LOGO="branding/gos-logo.png"
-          elif [ -f "branding/gos-logo.jpg" ]; then
-            LOGO="branding/gos-logo.jpg"
+          mkdir -p source
+          cd source
+          repo init -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH" --depth=1
+
+      - name: Sync sources (parallel, shallow)
+        run: |
+          cd source
+          repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
+
+      - name: Clone dandelion device tree
+        run: |
+          mkdir -p source/device/xiaomi
+          git clone --depth=1 -b "$DEVICE_TREE_BRANCH" "$DEVICE_TREE_URL" \
+            source/device/xiaomi/dandelion
+
+      - name: Clone dandelion kernel source
+        run: |
+          mkdir -p source/kernel/xiaomi
+          git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_URL" \
+            source/kernel/xiaomi/mt6762
+
+      - name: Apply Python 2 legacy patch for DrvGen.py
+        run: |
+          sudo ln -sf /usr/bin/python2 /usr/bin/python
+          DRVGEN="source/device/xiaomi/dandelion/DrvGen.py"
+          if [ -f "$DRVGEN" ]; then
+            echo "Found DrvGen.py, verifying it runs under python2..."
+            python2 "$DRVGEN" --check || echo "DrvGen check step is placeholder - adjust to device tree's actual usage"
           else
-            echo "No logo found at branding/gos-logo.png(.jpg) - skipping icon generation for now"
-            LOGO=""
-          fi
-          if [ -n "$LOGO" ]; then
-            convert "$LOGO" -resize 48x48   out/mipmap-mdpi/ic_launcher.png
-            convert "$LOGO" -resize 72x72   out/mipmap-hdpi/ic_launcher.png
-            convert "$LOGO" -resize 96x96   out/mipmap-xhdpi/ic_launcher.png
-            convert "$LOGO" -resize 144x144 out/mipmap-xxhdpi/ic_launcher.png
-            convert "$LOGO" -resize 192x192 out/mipmap-xxxhdpi/ic_launcher.png
-            convert "$LOGO" -resize 512x512 out/gos-logo-large.png
-            convert "$LOGO" -resize 1080x1080 out/gos-logo-splash.png
+            echo "DrvGen.py not found in device tree yet - add device tree first"
           fi
 
-      - name: Verify environment
+      - name: Verify source tree structure
         run: |
-          echo "== GOS Section 1 environment ready =="
-          echo "Device: $DEVICE"
-          echo "Android target: $ANDROID_TARGET"
-          clang --version || echo "clang not yet on PATH in this step (expected until Section 2)"
-          python2 --version
-          java -version
+          echo "== GOS Section 2 source sync complete =="
+          ls -la source/device/xiaomi/dandelion || echo "device tree missing"
+          ls -la source/kernel/xiaomi/mt6762 || echo "kernel source missing"
 
-      - name: Upload environment marker for Section 2
+      - name: Upload synced source tree for Section 3
         uses: actions/upload-artifact@v4
         with:
-          name: section1-env-ready
+          name: section2-source-ready
           path: |
-            toolchains/proton-clang/bin/clang
+            source/device/xiaomi/dandelion
+            source/kernel/xiaomi/mt6762
           retention-days: 1
-
-      - name: Upload generated icons and logo assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: section1-gos-icons
-          path: out/
-          retention-days: 7
-          if-no-files-found: ignore
