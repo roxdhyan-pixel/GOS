@@ -113,7 +113,7 @@ jobs:
           # Remove the WHOLE -Werror token (e.g. -Werror-implicit-function-declaration,
           # -Werror=unknown-warning-option), not just the "-Werror" substring -
           # a partial removal leaves invalid dangling arguments like "-implicit-..."
-          find . -name "Makefile" -exec sed -i -E 's/-Werror(=|-)[^ ]*//g; s/-Werror\b//g' {} \;
+          find . -name "Makefile" -exec sed -i -E 's/-Werror(=|-)[^ ,)]*//g; s/-Werror\b//g' {} \;
           echo "Stripped full -Werror* flags from Makefiles so new clang warnings don't halt the build"
 
       - name: Build kernel with Proton Clang
