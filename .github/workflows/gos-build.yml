@@ -138,6 +138,15 @@ jobs:
             echo "Kernel build succeeded (plain Image, no dtb appended)"
             ls -la out/arch/$ARCH/boot/
           else
+            echo ""
+            echo "=================================================="
+            echo "===== KERNEL BUILD FAILED - LAST 150 LINES ======"
+            echo "=================================================="
+            tail -150 kernel_build.log
+            echo "=================================================="
+            echo "===== END OF FAILURE LOG - COPY FROM ABOVE ======"
+            echo "=================================================="
+            echo ""
             {
               echo "## Kernel build FAILED - no Image produced"
               echo ""
@@ -146,7 +155,7 @@ jobs:
               tail -150 kernel_build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::No kernel Image found - see the Summary tab on this workflow run for the failure log"
+            echo "::error::No kernel Image found - the failure log is printed directly above in this same log, between the ===== markers"
             exit 1
           fi
 
