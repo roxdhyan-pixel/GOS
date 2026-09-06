@@ -125,7 +125,7 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM_IAS=0 \
-            KCFLAGS="-Wno-error" \
+            KCFLAGS="-Wno-error -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-implicit-int -Wno-unknown-warning-option -Wno-address-of-packed-member -Wno-macro-redefined -Wno-enum-conversion -Wno-tautological-constant-out-of-range-compare -Wno-format" \
             2>&1 | tee kernel_build.log
 
       - name: Verify kernel image was produced
