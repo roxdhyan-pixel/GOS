@@ -1,178 +1,128 @@
-# File name: section3-kernel-build.yml
-# Path in repo: .github/workflows/section3-kernel-build.yml
-name: GOS Build - Section 3 - Kernel Build
+// File name: MainActivity.kt
+// Path in project: app/src/main/java/com/grape/gos/launcher/MainActivity.kt
+//
+// A small, iOS-styled home screen for GOS: rounded app icon grid on top,
+// fixed dock of favorite apps at the bottom. Minimal by design - meant
+// as a starting point to build on, not a full launcher replacement yet.
 
-on:
-  workflow_dispatch:
+package com.grape.gos.launcher
 
-env:
-  DEVICE: dandelion
-  DEFCONFIG: dandelion_defconfig
-  ARCH: arm64
-  KERNEL_URL: https://github.com/dandelion64-Archives/android_kernel_xiaomi_dandelion.git
-  KERNEL_BRANCH: android-10.0
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
-jobs:
-  kernel-build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 180
+data class AppIcon(val label: String, val color: Color)
 
-    steps:
-      - name: Checkout GOS repo
-        uses: actions/checkout@v4
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                GosHomeScreen()
+            }
+        }
+    }
+}
 
-      - name: Install kernel build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex \
-            libssl-dev libncurses-dev python2 python3 \
-            device-tree-compiler cpio rsync
+@Composable
+fun GosHomeScreen() {
+    val homeApps = listOf(
+        AppIcon("Phone", Color(0xFF34C759)),
+        AppIcon("Messages", Color(0xFF30D158)),
+        AppIcon("Camera", Color(0xFF8E8E93)),
+        AppIcon("Settings", Color(0xFF8E8E93)),
+        AppIcon("Photos", Color(0xFFFF9500)),
+        AppIcon("Clock", Color(0xFF1C1C1E)),
+        AppIcon("SIRA AI", Color(0xFF7B4DFF)),
+        AppIcon("Files", Color(0xFF007AFF)),
+    )
+    val dockApps = listOf(
+        AppIcon("Phone", Color(0xFF34C759)),
+        AppIcon("Browser", Color(0xFF007AFF)),
+        AppIcon("Messages", Color(0xFF30D158)),
+        AppIcon("Camera", Color(0xFF8E8E93)),
+    )
 
-      - name: Restore Proton Clang toolchain from Section 1's cache
-        uses: actions/cache/restore@v4
-        with:
-          path: toolchains/proton-clang
-          key: gos-${{ env.DEVICE }}-toolchain-nomatch
-          restore-keys: |
-            gos-${{ env.DEVICE }}-toolchain-
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Black
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                contentPadding = PaddingValues(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(homeApps) { app -> AppIconView(app) }
+            }
 
-      - name: Clone Proton Clang if cache miss
-        run: |
-          if [ ! -f "toolchains/proton-clang/bin/clang" ]; then
-            echo "Cache miss - cloning Proton Clang fresh"
-            mkdir -p toolchains
-            git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchains/proton-clang
-          else
-            echo "Restored Proton Clang from cache"
-          fi
-          echo "$(pwd)/toolchains/proton-clang/bin" >> $GITHUB_PATH
+            Dock(dockApps)
+        }
+    }
+}
 
-      - name: Verify clang is actually usable
-        run: |
-          export PATH="$(pwd)/toolchains/proton-clang/bin:$PATH"
-          if ! command -v clang &> /dev/null; then
-            echo "::error::clang not found on PATH after toolchain setup"
-            exit 1
-          fi
-          clang --version
+@Composable
+fun AppIconView(app: AppIcon) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(60.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(app.color),
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = app.label,
+            color = Color.White,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1
+        )
+    }
+}
 
-      - name: Clone kernel source
-        run: |
-          mkdir -p source/kernel/xiaomi
-          git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_URL" source/kernel/xiaomi/mt6762
-
-      - name: Verify kernel source is present
-        run: |
-          if [ ! -d "source/kernel/xiaomi/mt6762" ] || [ -z "$(ls -A source/kernel/xiaomi/mt6762 2>/dev/null)" ]; then
-            echo "::error::Kernel source not found - check KERNEL_URL in this workflow is set to a real repo"
-            exit 1
-          fi
-          echo "Kernel source found:"
-          ls -la source/kernel/xiaomi/mt6762
-
-      - name: Auto-detect the real defconfig filename
-        run: |
-          cd source/kernel/xiaomi/mt6762
-          CONFIG_DIR="arch/$ARCH/configs"
-          if [ -f "$CONFIG_DIR/$DEFCONFIG" ]; then
-            echo "Guessed DEFCONFIG ($DEFCONFIG) exists, using it"
-            echo "REAL_DEFCONFIG=$DEFCONFIG" >> $GITHUB_ENV
-          else
-            echo "Guessed DEFCONFIG ($DEFCONFIG) not found, searching for a match..."
-            MATCH=$(ls "$CONFIG_DIR" 2>/dev/null | grep -i "dandelion\|mt6765\|mt6762" | head -n1)
-            if [ -n "$MATCH" ]; then
-              echo "Found likely match: $MATCH"
-              echo "REAL_DEFCONFIG=$MATCH" >> $GITHUB_ENV
-            else
-              echo "::error::No matching defconfig found. Available configs in $CONFIG_DIR:"
-              ls "$CONFIG_DIR" 2>/dev/null || echo "$CONFIG_DIR does not exist"
-              exit 1
-            fi
-          fi
-
-      - name: Patch defconfig - bypass stack protector for modern toolchain
-        run: |
-          cd source/kernel/xiaomi/mt6762
-          DEFCONFIG_PATH="arch/$ARCH/configs/$REAL_DEFCONFIG"
-          sed -i '/CONFIG_CC_STACKPROTECTOR/d' "$DEFCONFIG_PATH"
-          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> "$DEFCONFIG_PATH"
-          echo "Patched $DEFCONFIG_PATH"
-
-      - name: Configure kernel (defconfig)
-        run: |
-          cd source/kernel/xiaomi/mt6762
-          make O=out ARCH=$ARCH CC=clang $REAL_DEFCONFIG
-          if [ ! -f "out/.config" ]; then
-            echo "::error::Kernel configure step did not produce out/.config - defconfig may be incompatible"
-            exit 1
-          fi
-
-      - name: Disable -Werror (modern clang produces new warnings old kernels don't expect)
-        run: |
-          cd source/kernel/xiaomi/mt6762
-          # Remove the WHOLE -Werror token (e.g. -Werror-implicit-function-declaration,
-          # -Werror=unknown-warning-option), not just the "-Werror" substring -
-          # a partial removal leaves invalid dangling arguments like "-implicit-..."
-          find . -name "Makefile" -exec sed -i -E 's/-Werror(=|-)[^ ,)]*//g; s/-Werror\b//g' {} \;
-          echo "Stripped full -Werror* flags from Makefiles so new clang warnings don't halt the build"
-
-      - name: Build kernel with Proton Clang
-        run: |
-          cd source/kernel/xiaomi/mt6762
-          make -j$(nproc) O=out ARCH=$ARCH \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM_IAS=0 \
-            KCFLAGS="-Wno-error -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-implicit-int -Wno-unknown-warning-option -Wno-address-of-packed-member -Wno-macro-redefined -Wno-enum-conversion -Wno-tautological-constant-out-of-range-compare -Wno-format" \
-            2>&1 | tee kernel_build.log
-
-      - name: Verify kernel image was produced
-        run: |
-          cd source/kernel/xiaomi/mt6762
-          if [ -f "out/arch/$ARCH/boot/Image.gz-dtb" ]; then
-            echo "Kernel build succeeded"
-            ls -la out/arch/$ARCH/boot/
-          elif [ -f "out/arch/$ARCH/boot/Image" ]; then
-            echo "Kernel build succeeded (plain Image, no dtb appended)"
-            ls -la out/arch/$ARCH/boot/
-          else
-            echo ""
-            echo "=================================================="
-            echo "===== KERNEL BUILD FAILED - LAST 150 LINES ======"
-            echo "=================================================="
-            tail -150 kernel_build.log
-            echo "=================================================="
-            echo "===== END OF FAILURE LOG - COPY FROM ABOVE ======"
-            echo "=================================================="
-            echo ""
-            {
-              echo "## Kernel build FAILED - no Image produced"
-              echo ""
-              echo "Last 150 lines of kernel_build.log:"
-              echo '```'
-              tail -150 kernel_build.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::No kernel Image found - the failure log is printed directly above in this same log, between the ===== markers"
-            exit 1
-          fi
-
-      - name: Upload full kernel build log (always, even on failure)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: section3-kernel-build-log
-          path: source/kernel/xiaomi/mt6762/kernel_build.log
-          retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Upload compiled kernel for Section 4
-        uses: actions/upload-artifact@v4
-        with:
-          name: section3-kernel-ready
-          path: |
-            source/kernel/xiaomi/mt6762/out/arch/*/boot/Image*
-            source/kernel/xiaomi/mt6762/kernel_build.log
-          retention-days: 3
+@Composable
+fun Dock(apps: List<AppIcon>) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = Color(0x33FFFFFF)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp, horizontal = 20.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            apps.forEach { app ->
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(app.color)
+                )
+            }
+        }
+    }
+}
