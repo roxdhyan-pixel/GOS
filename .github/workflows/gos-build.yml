@@ -18,52 +18,50 @@ env:
   DEVICE_TREE_BRANCH: lineage-23.0
   KERNEL_URL: https://github.com/YOUR_ORG/android_kernel_xiaomi_mt6762.git
   KERNEL_BRANCH: lineage-23.0
+  # Persistent path on YOUR disk - stays between runs, this is what makes it fast
+  SOURCE_DIR: /home/runner-persistent/gos-source
 
 jobs:
   source-sync:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    runs-on: self-hosted
+    timeout-minutes: 300
 
     steps:
       - name: Checkout GOS repo
         uses: actions/checkout@v4
 
-      - name: Free up disk space
+      - name: Ensure repo tool is installed (one-time)
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h
+          if ! command -v repo &> /dev/null; then
+            mkdir -p ~/bin
+            curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+            chmod a+x ~/bin/repo
+            echo "$HOME/bin" >> $GITHUB_PATH
+          else
+            echo "repo tool already installed, skipping"
+          fi
 
-      - name: Install repo tool
-        run: |
-          mkdir -p ~/bin
-          curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
-
-      - name: Configure git identity
+      - name: Configure git identity (one-time, harmless if repeated)
         run: |
           git config --global user.name "GOS Build Bot"
           git config --global user.email "build@grape-gos.dev"
           git config --global color.ui false
 
-      - name: Restore cached source tree if available
-        uses: actions/cache@v4
-        with:
-          path: source
-          key: gos-${{ env.DEVICE }}-source-${{ env.ANDROID_TARGET }}-${{ github.sha }}
-          restore-keys: |
-            gos-${{ env.DEVICE }}-source-${{ env.ANDROID_TARGET }}-
-
-      - name: Init repo manifest (Android 16 / lineage-23.0)
+      - name: Init manifest only if source tree doesn't exist yet
         run: |
-          mkdir -p source
-          cd source
-          repo init -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH" --depth=1
+          mkdir -p "$SOURCE_DIR"
+          cd "$SOURCE_DIR"
+          if [ ! -d ".repo" ]; then
+            echo "First run - initializing manifest (this part is one-time)"
+            repo init -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH" --depth=1
+          else
+            echo "Existing source tree found at $SOURCE_DIR - skipping init"
+          fi
 
-      - name: Sync sources (safe, retry-friendly)
+      - name: Sync sources (fast incremental after first run)
         run: |
-          cd source
+          cd "$SOURCE_DIR"
           for attempt in 1 2 3; do
             echo "Sync attempt $attempt..."
             repo sync -c -j4 --no-clone-bundle --no-tags && break
@@ -71,48 +69,46 @@ jobs:
             sleep 15
           done
 
-      - name: Clone dandelion device tree
+      - name: Clone or update dandelion device tree
         run: |
-          mkdir -p source/device/xiaomi
+          DT_PATH="$SOURCE_DIR/device/xiaomi/dandelion"
           if [[ "$DEVICE_TREE_URL" == *"YOUR_ORG"* ]]; then
-            echo "::warning::DEVICE_TREE_URL is still a placeholder - skipping device tree clone. Set it to your real repo in the workflow env."
+            echo "::warning::DEVICE_TREE_URL is still a placeholder - skipping."
+          elif [ -d "$DT_PATH/.git" ]; then
+            echo "Device tree exists - pulling latest instead of full clone"
+            git -C "$DT_PATH" pull
           else
-            git clone --depth=1 -b "$DEVICE_TREE_BRANCH" "$DEVICE_TREE_URL" \
-              source/device/xiaomi/dandelion
+            mkdir -p "$SOURCE_DIR/device/xiaomi"
+            git clone --depth=1 -b "$DEVICE_TREE_BRANCH" "$DEVICE_TREE_URL" "$DT_PATH"
           fi
 
-      - name: Clone dandelion kernel source
+      - name: Clone or update dandelion kernel source
         run: |
-          mkdir -p source/kernel/xiaomi
+          KERNEL_PATH="$SOURCE_DIR/kernel/xiaomi/mt6762"
           if [[ "$KERNEL_URL" == *"YOUR_ORG"* ]]; then
-            echo "::warning::KERNEL_URL is still a placeholder - skipping kernel clone. Set it to your real repo in the workflow env."
+            echo "::warning::KERNEL_URL is still a placeholder - skipping."
+          elif [ -d "$KERNEL_PATH/.git" ]; then
+            echo "Kernel source exists - pulling latest instead of full clone"
+            git -C "$KERNEL_PATH" pull
           else
-            git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_URL" \
-              source/kernel/xiaomi/mt6762
+            mkdir -p "$SOURCE_DIR/kernel/xiaomi"
+            git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_URL" "$KERNEL_PATH"
           fi
 
       - name: Apply Python 2 legacy patch for DrvGen.py
         run: |
-          sudo ln -sf /usr/bin/python2 /usr/bin/python
-          DRVGEN="source/device/xiaomi/dandelion/DrvGen.py"
+          sudo ln -sf /usr/bin/python2 /usr/bin/python 2>/dev/null || true
+          DRVGEN="$SOURCE_DIR/device/xiaomi/dandelion/DrvGen.py"
           if [ -f "$DRVGEN" ]; then
             echo "Found DrvGen.py, verifying it runs under python2..."
-            python2 "$DRVGEN" --check || echo "DrvGen check step is placeholder - adjust to device tree's actual usage"
+            python2 "$DRVGEN" --check || echo "Adjust this check to the device tree's actual usage"
           else
-            echo "DrvGen.py not found in device tree yet - add device tree first"
+            echo "DrvGen.py not found yet - add device tree first"
           fi
 
       - name: Verify source tree structure
         run: |
           echo "== GOS Section 2 source sync complete =="
-          ls -la source/device/xiaomi/dandelion || echo "device tree missing"
-          ls -la source/kernel/xiaomi/mt6762 || echo "kernel source missing"
-
-      - name: Upload synced source tree for Section 3
-        uses: actions/upload-artifact@v4
-        with:
-          name: section2-source-ready
-          path: |
-            source/device/xiaomi/dandelion
-            source/kernel/xiaomi/mt6762
-          retention-days: 1
+          echo "Source tree location: $SOURCE_DIR (persistent across runs)"
+          ls -la "$SOURCE_DIR/device/xiaomi/dandelion" 2>/dev/null || echo "device tree missing"
+          ls -la "$SOURCE_DIR/kernel/xiaomi/mt6762" 2>/dev/null || echo "kernel source missing"
