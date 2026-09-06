@@ -56,12 +56,25 @@ jobs:
           echo "$(pwd)/toolchains/proton-clang/bin" >> $GITHUB_PATH
 
       - name: Download kernel source from Section 2
+        id: download_source
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: section2-source-ready
           path: source
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id || inputs.section2_run_id }}
+
+      - name: Diagnose missing artifact with a clear message
+        if: steps.download_source.outcome == 'failure'
+        run: |
+          echo "::error::Could not download the Section 2 source artifact."
+          echo "::error::This almost always means Section 2 had nothing to upload -"
+          echo "::error::which happens when DEVICE_TREE_URL / KERNEL_URL in Section 2"
+          echo "::error::are still set to the YOUR_ORG placeholder and got skipped."
+          echo "::error::Fix: set real repo URLs in Section 2, re-run it successfully,"
+          echo "::error::then re-run Section 3."
+          exit 1
 
       - name: Verify kernel source is present
         run: |
