@@ -87,7 +87,6 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM_IAS=0 \
-            ASFLAGS="-EL" \
             2>&1 | tee kernel_build.log
 
       - name: Verify kernel image was produced
@@ -100,10 +99,26 @@ jobs:
             echo "Kernel build succeeded (plain Image, no dtb appended)"
             ls -la out/arch/$ARCH/boot/
           else
-            echo "::error::No kernel Image found in out/arch/$ARCH/boot/ - check kernel_build.log"
-            tail -100 kernel_build.log
+            {
+              echo "## Kernel build FAILED - no Image produced"
+              echo ""
+              echo "Last 150 lines of kernel_build.log:"
+              echo '```'
+              tail -150 kernel_build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::No kernel Image found - see the Summary tab on this workflow run for the failure log"
             exit 1
           fi
+
+      - name: Upload full kernel build log (always, even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: section3-kernel-build-log
+          path: source/kernel/xiaomi/mt6762/kernel_build.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload compiled kernel for Section 4
         uses: actions/upload-artifact@v4
