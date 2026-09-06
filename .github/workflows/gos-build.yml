@@ -4,24 +4,16 @@ name: GOS Build - Section 3 - Kernel Build
 
 on:
   workflow_dispatch:
-    inputs:
-      section2_run_id:
-        description: "Section 2 run ID to pull source artifact from (find it in the Section 2 run's URL). Leave blank if triggered automatically."
-        required: false
-        type: string
-  workflow_run:
-    workflows: ["GOS Build - Section 2 - Source Sync"]
-    types:
-      - completed
 
 env:
   DEVICE: dandelion
   DEFCONFIG: dandelion_defconfig
   ARCH: arm64
+  KERNEL_URL: https://github.com/YOUR_ORG/android_kernel_xiaomi_mt6762.git
+  KERNEL_BRANCH: lineage-23.0
 
 jobs:
   kernel-build:
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -55,31 +47,19 @@ jobs:
           fi
           echo "$(pwd)/toolchains/proton-clang/bin" >> $GITHUB_PATH
 
-      - name: Download kernel source from Section 2
-        id: download_source
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: section2-source-ready
-          path: source
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id || inputs.section2_run_id }}
-
-      - name: Diagnose missing artifact with a clear message
-        if: steps.download_source.outcome == 'failure'
+      - name: Clone kernel source directly (no longer depends on Section 2)
         run: |
-          echo "::error::Could not download the Section 2 source artifact."
-          echo "::error::This almost always means Section 2 had nothing to upload -"
-          echo "::error::which happens when DEVICE_TREE_URL / KERNEL_URL in Section 2"
-          echo "::error::are still set to the YOUR_ORG placeholder and got skipped."
-          echo "::error::Fix: set real repo URLs in Section 2, re-run it successfully,"
-          echo "::error::then re-run Section 3."
-          exit 1
+          mkdir -p source/kernel/xiaomi
+          if [[ "$KERNEL_URL" == *"YOUR_ORG"* ]]; then
+            echo "::error::KERNEL_URL is still a placeholder - set it to your real kernel repo before this can build anything."
+            exit 1
+          fi
+          git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_URL" source/kernel/xiaomi/mt6762
 
       - name: Verify kernel source is present
         run: |
           if [ ! -d "source/kernel/xiaomi/mt6762" ] || [ -z "$(ls -A source/kernel/xiaomi/mt6762 2>/dev/null)" ]; then
-            echo "::error::Kernel source not found - check Section 2's KERNEL_URL is set to a real repo"
+            echo "::error::Kernel source not found - check KERNEL_URL in this workflow is set to a real repo"
             exit 1
           fi
           echo "Kernel source found:"
