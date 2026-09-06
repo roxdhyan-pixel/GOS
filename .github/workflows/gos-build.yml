@@ -9,8 +9,8 @@ env:
   DEVICE: dandelion
   DEFCONFIG: dandelion_defconfig
   ARCH: arm64
-  KERNEL_URL: https://github.com/YOUR_ORG/android_kernel_xiaomi_mt6762.git
-  KERNEL_BRANCH: lineage-23.0
+  KERNEL_URL: https://github.com/dandelion64-Archives/android_kernel_xiaomi_dandelion.git
+  KERNEL_BRANCH: android-10.0
 
 jobs:
   kernel-build:
@@ -47,13 +47,9 @@ jobs:
           fi
           echo "$(pwd)/toolchains/proton-clang/bin" >> $GITHUB_PATH
 
-      - name: Clone kernel source directly (no longer depends on Section 2)
+      - name: Clone kernel source
         run: |
           mkdir -p source/kernel/xiaomi
-          if [[ "$KERNEL_URL" == *"YOUR_ORG"* ]]; then
-            echo "::error::KERNEL_URL is still a placeholder - set it to your real kernel repo before this can build anything."
-            exit 1
-          fi
           git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_URL" source/kernel/xiaomi/mt6762
 
       - name: Verify kernel source is present
